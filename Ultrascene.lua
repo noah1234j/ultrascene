@@ -6,7 +6,7 @@ using Lokasenna UI kit version 2 as version 3 documentation was incomplete
 
 -- User Variables --
 listen_freq = .05-- .05 IS DEFUALT in seconds, this is the speed at which lisners are triggered on
-scene_limit = 10 -- scene limiter inside ultrascene
+scene_limit = 20 -- scene limiter inside ultrascene
 -- midi scene limit is currently 95
 -- Snapshot limit default is 14, to increate this limit go to /user/AppData/Roaming/REAPER/S&M.ini
 -- edit SWSSNAPSHOT_GET and SWSSNAPSHOT_SAVE to increase the limit
@@ -65,24 +65,59 @@ GUI.x, GUI.y, GUI.w, GUI.h = 1300, 0, 445, 310
 scenes = table.load(data_path)
 
 -- lists channel names for ui
-    function list_channel_names()
+    function list_scene_names()
     scene_names = {}
-      for k, v in pairs(scenes) do
-        if (k <= 9) then scene_names[k] = "0" .. k .. " " .. scenes[k].name end
-        if (k > 9) then scene_names[k] = k .. " " .. scenes[k].name end
+    number_of_scenes = 0
+
+    for i=1,scene_limit
+    do 
+      scene_names[i] = ""
+      if (scenes[i] ~= nil) then
+        if (i <= 10 - 1) then scene_names[i] = "0" .. i .. " " .. scenes[i].name end
+        if (i > 10 - 1) then scene_names[i] = i .. " " .. scenes[i].name end
+        number_of_scenes = number_of_scenes + 1
+      else
+        if (i <= 10 - 1) then scene_names[i] = "0" .. i end
+        if (i > 10 - 1) then scene_names[i] = i end
       end
-    return #scene_names
+    end
+    return number_of_scenes
     end
     
+--move the selected scenes around
+  function move_scene(start, finish)
+    if (finish > 0 and finish <= scene_limit) then
+      local old = nil
+      if (scenes[finish] ~= nil) then old = scenes[finish] end
+      scenes[finish] = scenes[start]
+      scenes[start] = old
+      
+      table.save(scenes, data_path)
+      list_scene_names()
+      update()
+      set_index(finish)
+    end
+  end
+  
+  function move_scene_up()
+    current = get_index()
+    move_scene(current, current - 1)
+  end
+  
+  function move_scene_down()
+    current = get_index()
+    move_scene(current, current + 1)
+  end
+  
 --adds new scene to list
     function add_scene()
       res, new_scene_name = reaper.GetUserInputs("Add Scene", 1, "Scene Name: ", "", 0);
         
       if (string.len(new_scene_name) > 0) then
-        local index = #scene_names + 1 --only 
+        local index = list_scene_names() + 1 --only 
         if (index <= scene_limit) then
           table.insert(scenes, {
-            ["index"] = 2,
+            ["index"] = index, -- this needs to be updated
             ["start_rec_enabled"] = false,
             ["stop_rec_enabled"] = false,
             ["screenset_enabled"] = true, 
@@ -95,7 +130,7 @@ scenes = table.load(data_path)
             })
     
           table.save(scenes, data_path)
-          list_channel_names()
+          list_scene_names()
           update() -- this is NOT the right way to do this havn't found out how to successfully use GUI.elms.Scenes:update() yet
           set_index(index)
         end
@@ -106,10 +141,10 @@ scenes = table.load(data_path)
   function delete_scene()
     local i = get_index()
     
-    if (i~= nil)then
-      table.remove(scenes, i)
+    if (scenes[i] ~= nil) then
+      scenes[i] = nil
       table.save(scenes, data_path)
-      local n = list_channel_names()
+      local n = list_scene_names()
       update() -- this is NOT the right way to do this havn't found out how to successfully use GUI.elms.Scenes:update() yet
       
       if (i==1 and n > 1) then 
@@ -217,6 +252,19 @@ scenes = table.load(data_path)
         reaper.Main_OnCommand(snapshot_commandID, 0)
     end
 
+function dump(o)
+   if type(o) == 'table' then
+      local s = '{ '
+      for k,v in pairs(o) do
+         if type(k) ~= 'number' then k = '"'..k..'"' end
+         s = s .. '['..k..'] = ' .. dump(v) .. ','
+      end
+      return s .. '} '
+   else
+      return tostring(o)
+   end
+end
+
 --recall screenset
     function recall_screenset(value)
       base_val = 40444;
@@ -272,25 +320,26 @@ scenes = table.load(data_path)
   function save_settings()
     local val = get_index()
     
-    if (val ~= nil) then
-      local t = scenes[val]
+    if (GUI.Val("scene_name") ~= "") then
+      if (scenes[val] == nil) then scenes[val] = {} end
       
       -- Could do both of these as a dictionary and then loop through, this seemed easier to debug tho
-      t.name = GUI.Val("scene_name")
-      t.screenset_val = tonumber(GUI.Val("screenset_val"))
-      t.snapshot_val = tonumber(GUI.Val("snapshot_val"))
-      t.midi_val = tonumber(GUI.Val("midi_val"))
+      scenes[val].name = GUI.Val("scene_name")
+      scenes[val].screenset_val = tonumber(GUI.Val("screenset_val"))
+      scenes[val].snapshot_val = tonumber(GUI.Val("snapshot_val"))
+      scenes[val].midi_val = tonumber(GUI.Val("midi_val"))
+      scenes[val].index = tonumber(GUI.Val("index"))
       
       local options = GUI.Val("Options")
       
-      t.stop_rec_enabled = options[1]
-      t.start_rec_enabled = options[2]
-      t.snapshot_enabled = options[3]
-      t.screenset_enabled = options[4]
-      t.midi_enabled = options[5]
+      scenes[val].stop_rec_enabled = options[1]
+      scenes[val].start_rec_enabled = options[2]
+      scenes[val].snapshot_enabled = options[3]
+      scenes[val].screenset_enabled = options[4]
+      scenes[val].midi_enabled = options[5]
       
       table.save(scenes, data_path)
-      list_channel_names()
+      list_scene_names()
       update()
       set_index(val)
     end
@@ -298,13 +347,14 @@ scenes = table.load(data_path)
   
 -- populate side settings 
   function show_settings(val)
-    if (val ~= nil) then
+    if (scenes[val] ~= nil) then
       local t = scenes[val]
   
       GUI.Val("scene_name", t.name)
       GUI.Val("screenset_val", tostring(t.screenset_val))
       GUI.Val("snapshot_val", tostring(t.snapshot_val))
       GUI.Val("midi_val", tostring(t.midi_val))
+      GUI.Val("index", tostring(t.index))
       
       --Options Table
       local stop_rec = t.stop_rec_enabled
@@ -312,15 +362,13 @@ scenes = table.load(data_path)
       local screenset = t.screenset_enabled
       local snapshot = t.snapshot_enabled
       local midi = t.midi_enabled
-      
       GUI.Val("Options", {stop_rec, start_rec, snapshot, screenset, midi})
-    end
     
-    if (val == nil) then
+    else
       GUI.Val("scene_name", "")
-      GUI.Val("screenset_val", 0)
-      GUI.Val("snapshot_val", 0)
-      GUI.Val("midi_val", 0)
+      GUI.Val("screenset_val", val)
+      GUI.Val("snapshot_val", val)
+      GUI.Val("midi_val", val)
       GUI.Val("Options", {false, false, false, false, false})
     end
   end
@@ -386,7 +434,7 @@ function GUI.func() -- I should write a book "how to find the worst way to do ev
     
 end
 
-list_channel_names() -- have to list these here before startup so that They'll display correctly on loan
+list_scene_names() -- have to list these here before startup so that They'll display correctly on loan
 
 ----------------------------------------
 
@@ -454,10 +502,28 @@ GUI.New("midi_val", "Textbox", {
 
 GUI.New("scene_name", "Textbox", {
     z = 11,
-    x = 275.0,
-    y = 160.0,
-    w = 165,
+    x = 287.0,
+    y = 165.0,
+    w = 145,
     h = 20,
+    cap_pos = "left",
+    font_a = 3,
+    font_b = "monospace",
+    color = "txt",
+    bg = "wnd_bg",
+    shadow = true,
+    pad = 4,
+    undo_limit = 20,
+    focus = true,
+})
+
+GUI.New("index", "Textbox", {
+    z = 11,
+    x = 320.0,
+    y = 195.0,
+    w = 25,
+    h = 20,
+    caption = "index",
     cap_pos = "left",
     font_a = 3,
     font_b = "monospace",
@@ -481,7 +547,7 @@ GUI.New("Store", "Button", {
     col_fill = "elm_frame",
     func = master_store,
 })
-
+--[[
 GUI.New("New", "Button", {
     z = 11,
     x = 16,
@@ -493,7 +559,7 @@ GUI.New("New", "Button", {
     col_txt = "txt",
     col_fill = "elm_frame",
     func = add_scene
-})
+})--]]
 
 GUI.New("Options", "Checklist", {
     z = 11,
@@ -518,11 +584,11 @@ GUI.New("Options", "Checklist", {
 
 GUI.New("Save Config", "Button", {
     z = 1,
-    x = 315,
-    y = 190,
-    w = 70,
+    x = 390,
+    y = 195,
+    w = 40,
     h = 24,
-    caption = "Save Config",
+    caption = "Save",
     font = 3,
     col_txt = "txt",
     col_fill = "elm_frame",
@@ -543,7 +609,7 @@ GUI.New("Delete", "Button", {
 })
 
 --These buttons are intened to reorder saved scene, don't have time to implement right now
---[[
+
 GUI.New("↑", "Button", {
     z = 11,
     x = 16.0,
@@ -554,7 +620,8 @@ GUI.New("↑", "Button", {
     font = 3,
     col_txt = "txt",
     col_fill = "elm_frame",
-    func = move_up
+    func = move_scene_up
+
 })
 
 GUI.New("↓", "Button", {
@@ -567,8 +634,9 @@ GUI.New("↓", "Button", {
     font = 3,
     col_txt = "txt",
     col_fill = "elm_frame",
-    func = move_down
-}) --]]
+    func = move_scene_down
+
+}) 
 -- I know this isn't the right way to do this, eventually adding these on top of one another will cause buffer to overflow I think
 -- Should be using GUI.elms.Scenes:redraw()
 
